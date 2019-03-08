@@ -9,6 +9,8 @@
 - [Resources](#resources)
 - [Collections](#collections)
 - [Errors](#errors)
+- [Links](#links)
+  - [Construction](#construction)
 - [Schemas](#schemas)
   - [Schema Fields](#schema-fields)
       - [Field Validation](#field-validation)
@@ -171,12 +173,18 @@ Resource representations MUST have these attributes:
 
 SHOULD have, in almost all cases:
   - `id:` A string which uniquely identifies this resource.  (See [identifier](#identifiers) design considerations).
+  - `links:` A map with [links](#links) to:
+    - `self:` The location of the resource itself.
   - Other application-specific information attributes
  
+And MAY have, when appropriate:
+  - Additional `links:` entries for child resources and collections. 
+
 ```javascript
 {
   "id":      "b1b2e7006be", 
   "type":    "file",
+  "links":   { /* see links */ },
   "name":    "ultimate_answer.txt",
   "size":    2,
   /* ...  more application-specific attributes ... */
@@ -193,7 +201,12 @@ Collection representations MUST have:
   - `data:` An array containing resource representations
     - This MUST always be present and be an array, even if there are 0 or 1 entries in it.
 
+SHOULD have, in almost all cases:
+  - `links:` A map with [links](#links) to:
+    - `self:` The location of the resource itself.
+
 And MAY have, when appropriate:
+  - Additional `links:` entries for related resources and collections.
   - Additional application-specific attributes (on the collection, as it is itself a resource).
   - `pagination:` See [pagination](#pagination).
   - `sort:` See [sorting](#sorting).
@@ -203,6 +216,10 @@ And MAY have, when appropriate:
 {
   "type": "collection",
   "resourceType": "file",
+  "links": { 
+    "self":     "https://base/v1/files",
+    /* ... more links ... */
+  },
   "pagination": { /* see pagination */ },
   "sort":       { /* see sorting */ },
   "filters":    { /* see filtering */ },
@@ -243,6 +260,50 @@ Error responses MUST be returned in the representation format that the client as
   /* ... more application-specific info ... */
 }
 ```
+----------------------------------------
+
+
+# Links #
+Links provide a trail for the client to follow to get to related information that is not included in the response.
+
+Clients
+  - SHOULD use the links provided to navigate resources.
+  - SHOULD NOT hard-code or string-concatenate URLs (other than the version root).
+
+Services
+  - SHOULD provide all appropriate links to that a client can get to anything exclusively by navigating resource links.
+  - SHOULD strive to keep URL layout stable, as clients may save link values and expect to be able to retrieve them later.
+  - MAY alter URL layout and link values, if necessary.
+    - This is not considered a [breaking change](#api-versioning), but the Service SHOULD redirect old URLs to the new ones.
+
+```javascript
+{
+  "links": {
+    "self":     "https://base/v1/files/b1b2e7006be",
+    "collection":     "https://base/v1/files",
+    "update":     "https://base/v1/files/b1b2e7006be",
+    "remove":     "https://base/v1/files/b1b2e7006be",
+    "content":  "https://base/v1/files/b1b2e7006be/content",
+    /* ... more links ... */
+  },
+  /* ...other attributes... */ 
+}
+```
+
+Link entries SHOULD lead to a valid destination.  For example, if you know a resource has no "public" URL because it is not shared, do not include the "public" attribute.
+
+See also: [What to link](#what-to-link)
+
+### Construction ###
+Link values are strings and MUST be an absolute URL, including the scheme, host, port, and [API Version](#api-versioning).
+  - This prevents the client needing resolve relative URLs into absolute ones.
+  - [HTTP compression](#compression) makes the overhead of transmitting absolute vs relative URLs negligible.
+  - Port SHOULD be omitted if it is the default for the scheme (e.g. 443 for https).
+
+Handling forward slashes:
+  - Trailing slashes SHOULD NOT be included on URLs produced by a service.
+  - SHOULD have no effect on the response if a client sends one.
+  - Multiple slashes in a URL SHOULD be treated as a single slash.
 
 ----------------------------------------
 
@@ -1049,6 +1110,7 @@ In general something along the lines of a [GUID](http://www.ietf.org/rfc/rfc4122
 Each resource SHOULD have a single canonical URL and the representation of that resource SHOULD NOT change depending on how the client got to it.
   
 If a file resource is accessible at `https://base/v1/files/b1b2e7006be` and as a data item in a collection `https://base/v1/folders/d5a80ee7/files`, both representations SHOULD be exactly the same.
+  - The links inside the resource SHOULD reflect the canonical URL.
   - It makes it possible to compare 2 representations and determine if they are in fact the same resource.
 
 ```http
@@ -1065,6 +1127,13 @@ X-API-Schemas: https://base/v1/schemas
 {
   "id":      "b1b2e7006be", 
   "type":    "file",
+  "links":   { 
+    "self":     "https://base/v1/files/b1b2e7006be",
+    "schemas":  "https://base/v1/schemas",
+    "content":  "https://base/v1/files/b1b2e7006be/content",
+    "folder":   "https://base/v1/folders/19c3932wef",
+    "public":   "http://documents.your-files.com/ultimate_answer.txt"
+  },
   "name":    "ultimate_answer.txt",
   /* ...  more attributes ... */
 }
@@ -1083,6 +1152,10 @@ X-API-Schemas: https://base/v1/schemas
 
 {
   "type": "collection",
+  "links": {
+    "self": "https://base/v1/folders/d5a80ee7/files",
+    "schemas": "https://base/v1/schemas"
+  }
   /* ... more attributes ... */
   "data": [
     { 
@@ -1147,3 +1220,18 @@ Resources can be classified into two categories, singular and complex relationsh
 In other words, it is RECOMMENDED that complex types follow a `/resource/id/subresource` model.
 
 See [Canonical Links](#canonical-links)
+
+## What to Link ##
+Guidelines for creating links:
+  - Every reference to the `id:` of another resource SHOULD have a corresponding link.
+    - For example if a file resource has a `folderId:` field, there should be a `folder:` link.
+  - Links to a single resource SHOULD be singular.
+    - e.g. `"content": "https://base/v1/files/b1b2e7006be/content"`
+  - Links to a collection SHOULD be plural.
+    - e.g. `"files": "https://base/v1/folders/d5a80ee7/files"`
+  - Limit your URL namespace as much as possible.  The less surface area you have exposed the less there is that might need to change later.
+  - Path components and query parameter names SHOULD be short, meaningful words in all lowercase, easy for a human to read.
+  - Services SHOULD NOT change the format or construction of URLs within an API version
+    - In theory, everyone uses the discoverability features and follows links, so services may change URL formats at any time.
+    - But some clients will inevitably ignore discoverability and hardcode paths into their code.
+    - So if a URL needs to be changed, provide a 301/302 redirect or release a new [API version](#api-versioning).
